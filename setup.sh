@@ -39,10 +39,10 @@ render_nftables() {
     local prerouting forward
     if [[ -n "$allow_source" ]]; then
         prerouting="        ip saddr $allow_source udp dport $listen_port dnat to $mullvad_ip:$mullvad_port"
-        forward="        ip saddr $allow_source ip daddr $mullvad_ip udp dport $mullvad_port accept"
+        forward="        ip saddr $allow_source ip daddr $mullvad_ip udp dport $mullvad_port accept comment \"open-hop: relay -> mullvad\""
     else
         prerouting="        udp dport $listen_port dnat to $mullvad_ip:$mullvad_port"
-        forward="        ip daddr $mullvad_ip udp dport $mullvad_port accept"
+        forward="        ip daddr $mullvad_ip udp dport $mullvad_port accept comment \"open-hop: relay -> mullvad\""
     fi
     cat <<EOF
 #!/usr/sbin/nft -f
