@@ -1,0 +1,3 @@
+# editor / build artifacts (keep benign)
+*.log
+__pycache__/
