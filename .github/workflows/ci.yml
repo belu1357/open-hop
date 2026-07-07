@@ -29,7 +29,7 @@ jobs:
       - name: bats unit tests
         run: bats test/unit/
       - name: nft syntax matrix
-        run: bash test/emulate.sh --syntax-matrix
+        run: sudo bash test/emulate.sh --syntax-matrix
 
   integration:
     runs-on: ubuntu-latest
