@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shfmt
+        run: |
+          curl -sSL https://github.com/mvdan/sh/releases/download/v3.8.0/shfmt_v3.8.0_linux_amd64 -o /tmp/shfmt
+          chmod +x /tmp/shfmt
+      - name: shfmt check (reads .editorconfig)
+        run: git ls-files -z '*.sh' | xargs -0 /tmp/shfmt -d
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: ShellCheck
+        run: git ls-files -z '*.sh' | xargs -0 shellcheck
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get install -y bats nftables python3
+      - name: bats unit tests
+        run: bats test/unit/
+      - name: nft syntax matrix
+        run: ./test/emulate.sh --syntax-matrix
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get install -y nftables python3 iproute2
+      - name: Netns relay + isolation test
+        run: sudo ./test/emulate.sh
