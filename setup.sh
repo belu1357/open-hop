@@ -83,6 +83,43 @@ $forward
 EOF
 }
 
+# ---------- system layer (mutates the host; covered by integration test) ----------
+require_root() {
+    ((EUID == 0)) || {
+        echo "error: must run as root (use sudo)" >&2
+        exit 1
+    }
+}
+
+ensure_nft() {
+    if ! command -v nft >/dev/null 2>&1; then
+        echo "nft not found; installing nftables..." >&2
+        apt-get update
+        DEBIAN_FRONTEND=noninteractive apt-get install -y nftables
+    fi
+}
+
+detect_vps_ip() {
+    ip -o -4 route get 1.1.1.1 2>/dev/null |
+        awk '{for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}'
+}
+
+render_sysctl() {
+    cat <<'EOF'
+# Managed by open-hop setup.sh
+net.ipv4.ip_forward=1
+EOF
+}
+
+apply_rules() {
+    nft -c -f /etc/nftables.conf || {
+        echo "error: nft syntax check failed" >&2
+        exit 1
+    }
+    systemctl enable --now nftables
+    nft -f /etc/nftables.conf
+}
+
 # ---------- entrypoint ----------
 main() {
     echo "open-hop: validators loaded; CLI added in a later task" >&2
