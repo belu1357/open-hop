@@ -107,13 +107,13 @@ Before touching the server, grab a config from Mullvad's website (this reuses yo
 Open your VPS's **web console** (or SSH in), then paste these one at a time. Replace `<mullvad_server_ip>` with the Endpoint IP you noted in step 2:
 
 ```bash
-git clone https://github.com/belu1357/open-hop.git
-cd open-hop
+git clone https://github.com/belu1357/openhop.git
+cd openhop
 sudo bash setup.sh --mullvad-ip <mullvad_server_ip> --yes
 sudo bash setup.sh confirm
 ```
 
-The setup prints `open-hop relay up` and even tells you the exact `Endpoint` line to set next. The `confirm` line locks the firewall rules in (otherwise they auto-revert after 10 minutes, which is a safety net so a bad rule can't lock you out).
+The setup prints `openhop relay up` and even tells you the exact `Endpoint` line to set next. The `confirm` line locks the firewall rules in (otherwise they auto-revert after 10 minutes, which is a safety net so a bad rule can't lock you out).
 
 ### 4. Install WireGuard and point your config at your VPS
 
