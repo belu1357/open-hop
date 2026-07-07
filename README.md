@@ -22,17 +22,16 @@ Internet
 | Who's watching | What they see | What they can't see |
 |---|---|---|
 | Your ISP / local network | A persistent UDP link from your device to your VPS. They can tell the VPS is yours: that link is **visible and unavoidable**. | Content, destinations, or DNS: all sealed inside the WireGuard tunnel before it leaves your device. |
-| The VPS / its datacentre | Sealed WireGuard UDP it forwards but cannot decrypt. It performs only IP/UDP header rewriting, never plaintext inspection or DNS. | Your traffic or DNS lookups. With anonymous (Monero) payment, also not tied to your name in billing. |
+| The VPS / its datacentre | Sealed WireGuard UDP it forwards but cannot decrypt. It performs only IP/UDP header rewriting, never plaintext inspection or DNS. | Your traffic or DNS lookups. |
 | Mullvad | Your traffic exits here. Mullvad holds no identity on you and keeps no logs. | Your real identity / home IP (it sees only the VPS's IP). |
 | Websites you visit | Mullvad's shared exit IP; you are one of thousands. | Your real IP. |
 
-Be straight about three things:
+Be straight about four things:
 
 1. **The ISP-to-VPS link is visible.** Openhop hides *what you do* (via encryption), not *that you use a VPS*.
 2. **The VPS makes its own outbound connections** (for `apt` security updates, NTP, and its own DNS). The strong guarantee is that your *forwarded* traffic can only take the relay path; it is not a guarantee that the box has zero outbound of its own.
 3. **The kill switch is your device's job.** Openhop ensures the VPS can't mis-route your traffic; it cannot stop your device from leaking if the tunnel drops and your WireGuard/Mullvad app's kill switch is off. Turn the kill switch **on**.
-
-Monero payment is an optional datacentre-side paper-trail reduction, **not a core privacy pillar**; the visible connection is identical regardless of how you paid.
+4. **The relay port is open by default.** Anyone who guesses your `VPS_IP:51820` can push UDP through your relay, but it is useless to them without your Mullvad key (Mullvad authenticates the peer), so abuse is bounded to your bandwidth. Pass `--allow-source <your IP>` to restrict it.
 
 ## Quickstart
 
@@ -41,7 +40,10 @@ On a fresh Ubuntu 22.04/24.04 VPS:
 ```bash
 sudo bash setup.sh --mullvad-ip <mullvad_server_ip> --yes
 sudo bash setup.sh show     # confirm the ruleset
+sudo bash setup.sh confirm  # keep the rules (cancels the 10-min auto-revert)
 ```
+
+With `--yes` the install is non-interactive and **arms a 10-minute lockout guard**: do nothing and the firewall reverts to open after 10 min (so a bad rule can't brick SSH). The `confirm` line above cancels it. For a fully unattended install (e.g. cloud-init) that keeps the rules immediately, pass `--guard-mins 0` instead.
 
 On your device, take the WireGuard config from your Mullvad account and change one line (the `Endpoint`) to your VPS (see [`wg-client.conf.example`](wg-client.conf.example)):
 
@@ -56,6 +58,8 @@ Connect. Done.
 | Option | Default | Notes |
 |---|---|---|
 | `--mullvad-port` | `51820` | Mullvad also serves UDP `53` and `443`; use these if `51820` is also blocked. |
+| `--listen-port` | `51820` | Port on the VPS your client connects to (the port in your `Endpoint` line). |
+| `--check` | | Render the config and `nft -c` syntax-check it; do not apply. |
 | `--allow-source <cidr>` | *(any)* | Restrict the relay to a source IP/CIDR (e.g. your home IP). |
 | `--ssh-port` | `22` | Admin port kept open. |
 | `--guard-mins` | `10` | Lockout-guard window; `0` disables it. |
