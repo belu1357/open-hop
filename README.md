@@ -5,7 +5,7 @@
 Openhop turns a cheap VPS into a *dumb UDP relay*: your device runs the normal Mullvad WireGuard client, and the VPS only forwards already-encrypted packets to Mullvad. You connect only to your VPS's own IP, so a block on Mullvad's IPs never reaches you. Because the tunnel begins and ends on your own hardware, the VPS never holds a key and physically cannot read your traffic or resolve DNS on your behalf.
 
 ```
-Your device (Mullvad WireGuard client)
+Your device (WireGuard client pointing at your VPS)
         |   WireGuard-encrypted on YOUR hardware
         v
 Your VPS (dumb UDP relay)
