@@ -77,11 +77,34 @@ A VPS is just a small Linux computer you rent in a datacentre. Any provider work
 - **DigitalOcean** - beginner-friendly interface, good docs. Smallest "Droplet" is fine.
 - **Vultr** or **Linode** - similar, widely available regions.
 
-When creating it, choose **Ubuntu 22.04 or 24.04** as the operating system and the smallest size. Pick a location in a country where VPN use is allowed, and whose network isn't the one blocking you. After it's created, the provider shows you the server's **public IP address** and a way to log in over **SSH** (the provider's "how to connect" page walks you through this for your operating system).
+When creating it, choose **Ubuntu 22.04 or 24.04** as the operating system and the smallest size. Pick a location in a country where VPN use is allowed, and whose network isn't the one blocking you. After it's created, the provider shows you the server's **public IP address** (four numbers like `198.199.121.238`) - note it down, you'll need it. Most providers (DigitalOcean, Hetzner, Vultr) also give you a **web console**: a button that opens a black terminal window in your browser and logs you straight in, so you don't have to set up SSH. Use that if you'd rather not SSH.
 
-### 2. Install Openhop on the VPS
+### 2. Get a Mullvad WireGuard config
 
-SSH into the server, then download and run Openhop:
+Before touching the server, grab a config from Mullvad's website (this reuses your existing keys - it doesn't use up a new one):
+
+1. Go to Mullvad's [WireGuard config generator](https://mullvad.net/en/account/wireguard-config) and log in.
+2. You'll see dropdowns to **select an exit location**. Pick a **country** and a **city** (any is fine - somewhere near your VPS is good). Leave the third dropdown on **All servers**, or pick one specific server; it doesn't matter.
+3. Leave the **Content Blocking** checkboxes unchecked for now.
+4. Click **Download zip archive** and open the zip. Inside are several `.conf` files, one per server, named like `us-lax-wg-002.conf`.
+5. **Pick any one** of them and open it in any **text editor**. You'll see something like:
+
+   ```ini
+   [Interface]
+   PrivateKey = ...
+   Address = ...
+   DNS = 10.64.0.1
+
+   [Peer]
+   PublicKey = ...
+   Endpoint = 23.234.72.127:51820
+   ```
+
+6. **Note the IP in the `Endpoint` line** (here, `23.234.72.127`) - that's your Mullvad server IP for the next step. Keep this file open; you'll edit it in step 4.
+
+### 3. Install Openhop on the VPS
+
+Open your VPS's **web console** (or SSH in), then paste these one at a time. Replace `<mullvad_server_ip>` with the Endpoint IP you noted in step 2:
 
 ```bash
 git clone https://github.com/belu1357/open-hop.git
@@ -90,34 +113,37 @@ sudo bash setup.sh --mullvad-ip <mullvad_server_ip> --yes
 sudo bash setup.sh confirm
 ```
 
-(You'll get the `<mullvad_server_ip>` in the next step; you can come back and run this once you have it.)
+The setup prints `open-hop relay up` and even tells you the exact `Endpoint` line to set next. The `confirm` line locks the firewall rules in (otherwise they auto-revert after 10 minutes, which is a safety net so a bad rule can't lock you out).
 
-### 3. Set up Mullvad WireGuard on your device
+### 4. Install WireGuard and point your config at your VPS
 
-On the device you'll actually browse from:
+On the device you'll actually browse from, install the **standalone WireGuard app** from [wireguard.com/install](https://www.wireguard.com/install/) (desktop) or the **WireGuard** app from your phone's app store.
 
-- **Easiest:** install the [Mullvad app](https://mullvad.net/en/download) - it uses WireGuard automatically.
-- **Or the WireGuard app directly**, following Mullvad's own guides: [Windows](https://mullvad.net/en/help/wireguard-app-windows) or [Linux](https://mullvad.net/en/help/easy-wireguard-mullvad-setup-linux).
+> **Not the Mullvad app.** The Mullvad app only connects to Mullvad's own servers and can't import a custom config - so it can't point at your VPS. You need the plain WireGuard app, which lets you load and edit a config. The Mullvad [Windows](https://mullvad.net/en/help/wireguard-app-windows) / [Linux](https://mullvad.net/en/help/easy-wireguard-mullvad-setup-linux) guides are useful background on WireGuard itself.
 
-Either way, generate a **WireGuard configuration** from your Mullvad account's [config generator](https://mullvad.net/en/account/wireguard-config). Note the server IP it gives you - that's the `<mullvad_server_ip>` for step 2.
-
-### 4. Point your config at your VPS
-
-In the WireGuard config, find the `Endpoint` line and change it to your VPS's IP:
+Now edit the `.conf` file you opened in step 2. Find the `Endpoint` line and change **only the IP** to your VPS's public IP (leave the `:51820` port and everything else exactly as-is, especially `DNS = 10.64.0.1`):
 
 ```ini
 Endpoint = <VPS_PUBLIC_IP>:51820
 ```
 
-Leave everything else (including `DNS = 10.64.0.1`) exactly as Mullvad generated it. Load the config into the WireGuard/Mullvad app and connect.
+Save the file. Then load it into WireGuard:
+
+- **Desktop:** open WireGuard → **Add Tunnel** / **Import tunnel(s) from file** → choose your edited `.conf`.
+- **Phone:** open WireGuard → **+** → **Create from file or archive** (get the edited file onto your phone first).
+
+Click **Activate / Connect**.
 
 ### 5. Check it works
 
-- Visit [https://am.i.mullvad.net](https://am.i.mullvad.net) - it should show you're connected via Mullvad, not your home IP.
-- Run [Mullvad's leak check](https://mullvad.net/en/check) - resolver should be Mullvad, not your ISP.
-- **Turn your app's kill switch on**, then disconnect the tunnel: browsing should stop, not fall back to your normal connection.
+First, understand the checkpoint: Mullvad's own check sites (like `am.i.mullvad.net`) **won't load unless you're connected through Mullvad** - so if one fails while you're disconnected, that's expected, not a fault.
 
-That's it - you're reaching Mullvad through your own server.
+- **Before connecting**, visit [https://dnsleaktest.com](https://dnsleaktest.com) - it shows your **real home IP and location**. Note it.
+- **Connect the tunnel** (step 4), then reload [https://dnsleaktest.com](https://dnsleaktest.com) - the IP and location should now be **your Mullvad exit** (the city you picked), not your home. Your real IP has vanished.
+- For extra confirmation, visit [https://am.i.mullvad.net](https://am.i.mullvad.net) - it should now load and say **"You are using Mullvad VPN"** with the server name.
+- In the WireGuard app itself, a **recent "Latest handshake"** time and rising **Transfer** numbers are proof the relay is forwarding correctly.
+
+If the IP changed to your Mullvad city, it works - you're reaching Mullvad through your own server.
 
 ### Useful options
 
