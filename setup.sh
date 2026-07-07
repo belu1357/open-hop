@@ -175,9 +175,204 @@ cmd_confirm() {
     echo "open-hop: lockout guard cancelled; rules kept."
 }
 
+# ---------- config persistence ----------
+persist_config() {
+    cat >/etc/open-hop.conf <<EOF
+# Managed by open-hop setup.sh
+MULLVAD_IP="$1"
+LISTEN_PORT="$2"
+MULLVAD_PORT="$3"
+SSH_PORT="$4"
+ALLOW_SOURCE="$5"
+EOF
+}
+
+# ---------- subcommands ----------
+cmd_show() {
+    echo "=== /etc/open-hop.conf ==="
+    cat /etc/open-hop.conf 2>/dev/null || echo "(none)"
+    echo
+    echo "=== active nft ruleset ==="
+    nft list ruleset
+}
+
+cmd_uninstall() {
+    require_root
+    cmd_confirm 2>/dev/null || true
+    nft flush ruleset 2>/dev/null || true
+    systemctl disable --now nftables 2>/dev/null || true
+    rm -f /etc/sysctl.d/99-open-hop.conf /etc/nftables.conf /etc/open-hop.conf
+    sysctl -w net.ipv4.ip_forward=0 >/dev/null 2>&1 || true
+    echo "open-hop removed. WARNING: firewall is now wide open; reinstall or apply your own rules."
+}
+
+usage() {
+    cat <<'EOF'
+open-hop: dumb nftables UDP relay to Mullvad.
+
+Usage:
+  sudo setup.sh --mullvad-ip <ip> [options]        install/apply the relay
+  sudo setup.sh show                               print active config + ruleset
+  sudo setup.sh confirm                            cancel the lockout guard
+  sudo setup.sh uninstall                          remove open-hop (opens firewall)
+
+Options:
+      --mullvad-ip <ip>      Mullvad server IPv4 to relay to (required)
+      --listen-port <port>   port on the VPS the client connects to (default 51820)
+      --mullvad-port <port>  Mullvad UDP port (default 51820; also try 53 or 443)
+      --ssh-port <port>      port kept open for admin (default 22)
+      --allow-source <cidr>  restrict the relay to a source CIDR/IP (default: any)
+      --guard-mins <n>       lockout-guard auto-revert window (default 10; 0 disables)
+      --yes                  non-interactive (skip confirm prompt; for cloud-init)
+      --check                render + nft -c syntax-check only; do not apply
+
+Each flag also reads an env var of the upper-snake-case name (e.g. MULLVAD_IP).
+EOF
+}
+
 # ---------- entrypoint ----------
 main() {
-    echo "open-hop: validators loaded; CLI added in a later task" >&2
+    local mullvad_ip="" listen_port=51820 mullvad_port=51820 ssh_port=22
+    local allow_source="" guard_mins=10 yes=0 check_only=0
+
+    case "${1:-}" in
+    show)
+        cmd_show
+        exit 0
+        ;;
+    confirm)
+        require_root
+        cmd_confirm
+        exit 0
+        ;;
+    uninstall)
+        cmd_uninstall
+        exit 0
+        ;;
+    --help | -h)
+        usage
+        exit 0
+        ;;
+    esac
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+        --mullvad-ip | --listen-port | --mullvad-port | --ssh-port | --allow-source | --guard-mins)
+            [[ -n "${2:-}" ]] || {
+                echo "error: $1 needs a value" >&2
+                exit 2
+            }
+            case "$1" in
+            --mullvad-ip) mullvad_ip="$2" ;;
+            --listen-port) listen_port="$2" ;;
+            --mullvad-port) mullvad_port="$2" ;;
+            --ssh-port) ssh_port="$2" ;;
+            --allow-source) allow_source="$2" ;;
+            --guard-mins) guard_mins="$2" ;;
+            esac
+            shift 2
+            ;;
+        --yes)
+            yes=1
+            shift
+            ;;
+        --check)
+            check_only=1
+            shift
+            ;;
+        --help | -h)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "error: unknown argument: $1" >&2
+            usage
+            exit 2
+            ;;
+        esac
+    done
+
+    # env fallbacks
+    mullvad_ip="${MULLVAD_IP:-$mullvad_ip}"
+    listen_port="${LISTEN_PORT:-$listen_port}"
+    mullvad_port="${MULLVAD_PORT:-$mullvad_port}"
+    ssh_port="${SSH_PORT:-$ssh_port}"
+    allow_source="${ALLOW_SOURCE:-$allow_source}"
+
+    # validate
+    [[ -n "$mullvad_ip" ]] || {
+        echo "error: --mullvad-ip is required" >&2
+        exit 2
+    }
+    is_valid_ipv4 "$mullvad_ip" || {
+        echo "error: invalid --mullvad-ip: $mullvad_ip" >&2
+        exit 2
+    }
+    is_valid_port "$listen_port" || {
+        echo "error: invalid --listen-port: $listen_port" >&2
+        exit 2
+    }
+    is_valid_port "$mullvad_port" || {
+        echo "error: invalid --mullvad-port: $mullvad_port" >&2
+        exit 2
+    }
+    is_valid_port "$ssh_port" || {
+        echo "error: invalid --ssh-port: $ssh_port" >&2
+        exit 2
+    }
+    if [[ -n "$allow_source" ]]; then
+        is_valid_cidr "$allow_source" || {
+            echo "error: invalid --allow-source: $allow_source" >&2
+            exit 2
+        }
+    fi
+    # guard_mins may be 0 (disables the guard), so allow any non-negative int.
+    [[ "$guard_mins" =~ ^[0-9]+$ ]] || {
+        echo "error: invalid --guard-mins: $guard_mins" >&2
+        exit 2
+    }
+
+    if ((check_only)); then
+        if render_nftables "$mullvad_ip" "$listen_port" "$mullvad_port" "$ssh_port" "$allow_source" |
+            nft -c -f -; then
+            echo "syntax OK (--check)"
+        else
+            echo "error: syntax check failed" >&2
+            exit 1
+        fi
+        exit 0
+    fi
+
+    require_root
+    ensure_nft
+
+    echo "==> enabling IPv4 forwarding"
+    render_sysctl >/etc/sysctl.d/99-open-hop.conf
+    sysctl --system >/dev/null
+
+    echo "==> writing /etc/nftables.conf"
+    render_nftables "$mullvad_ip" "$listen_port" "$mullvad_port" "$ssh_port" "$allow_source" \
+        >/etc/nftables.conf
+
+    echo "==> applying nftables ruleset"
+    apply_rules
+
+    persist_config "$mullvad_ip" "$listen_port" "$mullvad_port" "$ssh_port" "$allow_source"
+
+    if ((guard_mins > 0)); then
+        arm_guard "$guard_mins" "$yes"
+    fi
+
+    local vps_ip
+    vps_ip="$(detect_vps_ip)"
+    echo
+    echo "✓ open-hop relay up: udp/${listen_port} -> ${mullvad_ip}:${mullvad_port}"
+    echo "  Set in your Mullvad WireGuard client:"
+    echo "    Endpoint = ${vps_ip}:${listen_port}"
+    if ((guard_mins > 0)); then
+        echo "  Keep these rules:  sudo bash setup.sh confirm"
+        echo "  (otherwise they auto-revert to open in ${guard_mins} min)"
+    fi
 }
 
 # Run main() only when executed, not when sourced (lets tests import functions).
