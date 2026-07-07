@@ -32,6 +32,57 @@ is_valid_cidr() {
     return 0
 }
 
+# ---------- nftables rendering (pure; unit-tested) ----------
+render_nftables() {
+    local mullvad_ip="$1" listen_port="$2" mullvad_port="$3" ssh_port="$4"
+    local allow_source="${5:-}"
+    local prerouting forward
+    if [[ -n "$allow_source" ]]; then
+        prerouting="        ip saddr $allow_source udp dport $listen_port dnat to $mullvad_ip:$mullvad_port"
+        forward="        ip saddr $allow_source ip daddr $mullvad_ip udp dport $mullvad_port accept"
+    else
+        prerouting="        udp dport $listen_port dnat to $mullvad_ip:$mullvad_port"
+        forward="        ip daddr $mullvad_ip udp dport $mullvad_port accept"
+    fi
+    cat <<EOF
+#!/usr/sbin/nft -f
+# Managed by open-hop setup.sh. Re-run setup.sh to change; do not edit by hand.
+flush ruleset
+
+table ip nat {
+    chain prerouting {
+        type nat hook prerouting priority dstnat; policy accept;
+$prerouting
+    }
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+        ip daddr $mullvad_ip udp dport $mullvad_port masquerade
+    }
+}
+
+table inet filter {
+    chain input {
+        type filter hook input priority filter; policy drop;
+        ct state established,related accept
+        iif "lo" accept
+        tcp dport $ssh_port accept comment "open-hop: SSH admin"
+        # Relay inbound on $listen_port never reaches INPUT: prerouting DNAT
+        # rewrites its destination to $mullvad_ip, so it is forwarded, not local.
+        counter drop
+    }
+    chain forward {
+        type filter hook forward priority filter; policy drop;
+        ct state established,related accept
+$forward
+        counter drop
+    }
+    chain output {
+        type filter hook output priority filter; policy accept;
+    }
+}
+EOF
+}
+
 # ---------- entrypoint ----------
 main() {
     echo "open-hop: validators loaded; CLI added in a later task" >&2
