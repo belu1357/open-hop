@@ -2,7 +2,7 @@
 
 **Reach Mullvad through your own VPS when Mullvad's server IPs are blocked.**
 
-Openhop turns a cheap VPS into a *dumb UDP relay*: your device runs the normal Mullvad WireGuard client, and the VPS only forwards already-encrypted packets to Mullvad. You connect only to your VPS's own IP, so a block on Mullvad's IPs never reaches you. The VPS holds no keys and can never read your traffic or resolve DNS on your behalf.
+Openhop turns a cheap VPS into a *dumb UDP relay*: your device runs the normal Mullvad WireGuard client, and the VPS only forwards already-encrypted packets to Mullvad. You connect only to your VPS's own IP, so a block on Mullvad's IPs never reaches you. Because the tunnel begins and ends on your own hardware, the VPS never holds a key and physically cannot read your traffic or resolve DNS on your behalf.
 
 ```
 Your device (Mullvad WireGuard client)
@@ -16,6 +16,18 @@ Mullvad (decrypts here; runs its own DNS)
         v
 Internet
 ```
+
+## Why this exists
+
+VPN access is increasingly restricted by blocking the VPN provider's own servers: a network operator or authority takes the provider's published IP ranges and drops traffic to them. When that happens the app still runs, but its servers are simply unreachable.
+
+Openhop routes around that one specific failure. Because your device connects to *your* VPS (an ordinary server IP that isn't on any provider blocklist) and the VPS forwards your already-encrypted packets onward, a block on the provider's IPs never touches the address you actually connect to. You become your own reachable entry point.
+
+This is deliberately narrow. It restores *reachability* when provider IPs are blocked; it is not a tool for hiding that you use a VPN, and it targets no specific system or entity. It's built on a simple principle: access to a service shouldn't depend on that service's servers being reachable from your network. When a provider's own IPs get blocked, having your own entry point keeps the route open.
+
+Why it works, plainly: blocks usually target a provider's *known* server addresses. Openhop doesn't rely on those. You connect to your own ordinary server, which isn't on any blocklist, and it passes your already-encrypted traffic through to Mullvad. There is no known VPN address for a filter to catch.
+
+It's also preemptive by design. The lesson from places where access is heavily restricted is that you want a route in place *before* it's needed, not after. We think keeping an open route to the internet, on hardware you control, is worth protecting. Mullvad put the wider concern well in writing that age-based access controls are, in effect, <a href="https://mullvad.net/en/blog/age-verification-for-social-media-the-beginning-of-the-end-for-a-free-internet">"the beginning of the end for a free internet"</a>. Their post is a good read for the bigger picture. Openhop is one small, practical response: keep a route open.
 
 ## What this does and does not protect
 
@@ -53,6 +65,60 @@ Endpoint = <VPS_PUBLIC_IP>:51820
 
 Connect. Done.
 
+## Full setup guide (from scratch)
+
+If you're newer to this, here's the whole thing start to finish. It takes about 20-30 minutes and needs no prior server experience.
+
+### 1. Rent a VPS
+
+A VPS is just a small Linux computer you rent in a datacentre. Any provider works; these are cheap, reliable, and easy to start with:
+
+- **Hetzner** - very cheap, well regarded. A "CX22" or the smallest instance is plenty.
+- **DigitalOcean** - beginner-friendly interface, good docs. Smallest "Droplet" is fine.
+- **Vultr** or **Linode** - similar, widely available regions.
+
+When creating it, choose **Ubuntu 22.04 or 24.04** as the operating system and the smallest size. Pick a location in a country where VPN use is allowed, and whose network isn't the one blocking you. After it's created, the provider shows you the server's **public IP address** and a way to log in over **SSH** (the provider's "how to connect" page walks you through this for your operating system).
+
+### 2. Install Openhop on the VPS
+
+SSH into the server, then download and run Openhop:
+
+```bash
+git clone https://github.com/belu1357/open-hop.git
+cd open-hop
+sudo bash setup.sh --mullvad-ip <mullvad_server_ip> --yes
+sudo bash setup.sh confirm
+```
+
+(You'll get the `<mullvad_server_ip>` in the next step; you can come back and run this once you have it.)
+
+### 3. Set up Mullvad WireGuard on your device
+
+On the device you'll actually browse from:
+
+- **Easiest:** install the [Mullvad app](https://mullvad.net/en/download) - it uses WireGuard automatically.
+- **Or the WireGuard app directly**, following Mullvad's own guides: [Windows](https://mullvad.net/en/help/wireguard-app-windows) or [Linux](https://mullvad.net/en/help/easy-wireguard-mullvad-setup-linux).
+
+Either way, generate a **WireGuard configuration** from your Mullvad account's [config generator](https://mullvad.net/en/account/wireguard-config). Note the server IP it gives you - that's the `<mullvad_server_ip>` for step 2.
+
+### 4. Point your config at your VPS
+
+In the WireGuard config, find the `Endpoint` line and change it to your VPS's IP:
+
+```ini
+Endpoint = <VPS_PUBLIC_IP>:51820
+```
+
+Leave everything else (including `DNS = 10.64.0.1`) exactly as Mullvad generated it. Load the config into the WireGuard/Mullvad app and connect.
+
+### 5. Check it works
+
+- Visit [https://am.i.mullvad.net](https://am.i.mullvad.net) - it should show you're connected via Mullvad, not your home IP.
+- Run [Mullvad's leak check](https://mullvad.net/en/check) - resolver should be Mullvad, not your ISP.
+- **Turn your app's kill switch on**, then disconnect the tunnel: browsing should stop, not fall back to your normal connection.
+
+That's it - you're reaching Mullvad through your own server.
+
 ### Useful options
 
 | Option | Default | Notes |
@@ -82,6 +148,20 @@ If your VPS IP gets blocked, recovery is: deploy a new VPS, run `sudo bash setup
 - **Locked out of SSH:** don't panic: the guard reverts the firewall to open after 10 minutes (`--guard-mins`). Reconnect and re-run `setup.sh`.
 - **DNS not resolving:** confirm `DNS = 10.64.0.1` is still in your client config.
 - **Relay silently stopped after working before:** if you used `--allow-source` and your source IP later changes (e.g. new home IP), the relay stops until you re-run `setup.sh` with the new `--allow-source` (or drop the restriction).
+
+## Roadmap
+
+Openhop is built in tiers, matched to how access restrictions escalate. Each rung keeps the same architecture (your own server, off any provider blocklist) and adds a layer of disguise on top. As blocking methods evolve, we plan to keep Openhop current, adding the layer needed to meet each new class of restriction as it appears.
+
+- **v1: beats IP-blocking (available now).** Defeats the most common restriction: blocking a VPN provider's published server IPs. You connect to your own ordinary VPS IP, so a block on Mullvad's addresses never reaches the address you actually use. This is the method most likely to be used where VPN use itself is still legal.
+- **v2: obfuscation mode (planned).** Adds traffic-shape disguise (e.g. `udp2raw` or AmneziaWG-style wrapping) so the tunnel doesn't carry a recognisable WireGuard signature. This targets networks that use deep packet inspection to detect VPN traffic by its shape rather than its destination.
+- **v3: stealth masquerade (planned).** Adds a mode that disguises the connection as a genuine visit to a normal website (e.g. VLESS+Reality), to withstand active probing, where the network connects to your server to test whether it behaves like a VPN.
+
+v1 is deliberately kept clean and minimal so the core relay is easy to audit. The obfuscation tiers are optional layers on top, not rewrites, so you can run only what your situation needs.
+
+## A note on Mullvad
+
+Openhop is an independent, community project. It is **not affiliated with, endorsed by, or supported by Mullvad**. It simply works alongside Mullvad's standard WireGuard client. Please don't direct Openhop support questions to Mullvad.
 
 ## License
 
