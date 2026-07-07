@@ -120,6 +120,61 @@ apply_rules() {
     nft -f /etc/nftables.conf
 }
 
+# ---------- lockout guard ----------
+render_guard_service() {
+    cat <<'EOF'
+[Unit]
+Description=open-hop lockout guard: revert firewall to open
+RefuseManualStart=no
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/nft flush ruleset
+EOF
+}
+
+render_guard_timer() {
+    local mins="$1"
+    cat <<EOF
+[Unit]
+Description=open-hop lockout guard timer
+
+[Timer]
+OnActiveSec=${mins}min
+Unit=open-hop-revert.service
+
+[Install]
+WantedBy=timers.target
+EOF
+}
+
+arm_guard() {
+    local mins="$1" nonint="$2"
+    render_guard_service >/etc/systemd/system/open-hop-revert.service
+    render_guard_timer "$mins" >/etc/systemd/system/open-hop-revert.timer
+    systemctl daemon-reload
+    systemctl start open-hop-revert.timer
+    if ((nonint)); then
+        return
+    fi
+    local ans=""
+    if [[ -t 0 ]]; then
+        read -r -p "Rules applied - SSH should still work. Keep them? [Y/n] " ans || true
+    fi
+    if [[ "${ans:-y}" =~ ^[Yy]$ ]]; then
+        cmd_confirm
+    fi
+}
+
+cmd_confirm() {
+    systemctl stop open-hop-revert.timer 2>/dev/null || true
+    systemctl disable open-hop-revert.timer 2>/dev/null || true
+    rm -f /etc/systemd/system/open-hop-revert.service \
+        /etc/systemd/system/open-hop-revert.timer
+    systemctl daemon-reload
+    echo "open-hop: lockout guard cancelled; rules kept."
+}
+
 # ---------- entrypoint ----------
 main() {
     echo "open-hop: validators loaded; CLI added in a later task" >&2
