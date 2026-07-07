@@ -1,0 +1,28 @@
+# Openhop: Mullvad WireGuard client config example.
+#
+# Start from the WireGuard config you generate in your Mullvad account.
+# Openhop requires exactly ONE change: the [Peer] Endpoint line, pointed
+# at your VPS relay instead of Mullvad directly. Everything else stays as
+# Mullvad gave it to you.
+
+[Interface]
+PrivateKey = <your Mullvad interface private key>
+Address = <addresses from your Mullvad config>
+
+# Keep this exactly as Mullvad provides it (10.64.0.1). It sends your DNS
+# queries through the tunnel to Mullvad's resolver, which is reachable ONLY
+# inside the tunnel, so if the tunnel drops, DNS fails closed (no leak) on
+# top of your client kill switch. Do not remove this line.
+DNS = 10.64.0.1
+
+[Peer]
+PublicKey = <Mullvad server public key>
+AllowedIPs = 0.0.0.0/0, ::/0
+
+# --- THE Openhop CHANGE -----------------------------------------------
+# Was:  Endpoint = <Mullvad server IP>:51820
+# Now:  your VPS relay. Use the VPS_IP and --listen-port you configured
+# (default 51820). This is the only line you edit.
+Endpoint = <VPS_PUBLIC_IP>:51820
+
+PersistentKeepalive = 25
