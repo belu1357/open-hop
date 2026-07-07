@@ -32,7 +32,9 @@ bad() {
 }
 
 cleanup() {
-    [[ -n "$FAKE_PID" ]] && kill "$FAKE_PID" 2>/dev/null || true
+    if [[ -n "$FAKE_PID" ]]; then
+        kill "$FAKE_PID" 2>/dev/null || true
+    fi
     for ns in "$NS_C" "$NS_V" "$NS_U"; do
         ip netns del "$ns" 2>/dev/null || true
     done
@@ -188,7 +190,7 @@ s.sendto(b"EXFIL", ("100.64.0.2", 9999))
 PY
 sleep 0.2
 DROP="$(ip netns exec "$NS_V" nft list chain inet filter forward 2>/dev/null || true)"
-if echo "$DROP" | grep -qE 'counter packets [1-9][0-9]* bytes [1-9]'; then
+if echo "$DROP" | grep -qE 'counter packets [1-9][0-9]* bytes [1-9][0-9]* drop'; then
     ok "forward drop rule fired (no exfil path upstream->client)"
 else
     bad "forward drop rule did not fire"

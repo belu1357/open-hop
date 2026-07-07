@@ -198,7 +198,7 @@ cmd_show() {
 
 cmd_uninstall() {
     require_root
-    cmd_confirm 2>/dev/null || true
+    cmd_confirm >/dev/null 2>&1 || true
     nft flush ruleset 2>/dev/null || true
     systemctl disable --now nftables 2>/dev/null || true
     rm -f /etc/sysctl.d/99-open-hop.conf /etc/nftables.conf /etc/open-hop.conf
